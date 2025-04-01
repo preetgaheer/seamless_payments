@@ -1,14 +1,12 @@
 from enum import Enum
-from typing import Optional
-from pydantic import BaseModel, Field, EmailStr, PositiveInt, field_validator
+from typing import Optional, List
+from pydantic import (BaseModel, Field, EmailStr, PositiveInt, field_validator)
 from datetime import datetime
 
 
 class Currency(str, Enum):
     USD = "USD"
-    EUR = "EUR"
-    GBP = "GBP"
-    JPY = "JPY"
+    INR = "INR"
 
 
 class CustomerDetails(BaseModel):
@@ -34,7 +32,7 @@ class Item(BaseModel):
 
 class InvoiceRequest(BaseModel):
     customer: CustomerDetails
-    items: list[Item] = Field(..., min_items=1)
+    items: List[Item] = Field(..., min_items=1)
     currency: Currency = Currency.USD
     due_date: Optional[datetime] = None
     notes: Optional[str] = Field(None, max_length=1000)

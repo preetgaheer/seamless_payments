@@ -4,11 +4,14 @@ from datetime import datetime
 from typing import Dict, Any
 
 # local imports
-from app.payment_processor.base import BasePaymentProcessor
-from app.utils.http_client import HttpClient
-from app.schemas.core import (InvoiceRequest, InvoiceResponse,
-                              PaymentCaptureRequest, PaymentResponse)
-from app.exceptions.core import (PaymentCaptureError, InvoiceGenerationError)
+from seamless_payments.app.payment_processor.base import BasePaymentProcessor
+from seamless_payments.app.utils.http_client import HttpClient
+from seamless_payments.app.schemas.core import (InvoiceRequest,
+                                                InvoiceResponse,
+                                                PaymentCaptureRequest,
+                                                PaymentResponse)
+from seamless_payments.app.exceptions.core import (PaymentCaptureError,
+                                                   InvoiceGenerationError)
 
 logger = logging.getLogger(__name__)
 

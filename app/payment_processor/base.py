@@ -1,9 +1,12 @@
 from abc import ABC, abstractmethod
 
 # local imports
-from app.schemas.core import (InvoiceRequest, InvoiceResponse,
-                              PaymentCaptureRequest, PaymentResponse)
-from app.exceptions.core import (
+from seamless_payments.app.schemas.core import (
+    InvoiceRequest,
+    InvoiceResponse,
+    PaymentCaptureRequest,
+)
+from seamless_payments.app.exceptions.core import (
     PaymentValidationError, )
 
 

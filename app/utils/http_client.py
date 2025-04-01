@@ -3,7 +3,7 @@ from typing import Optional, Dict, Any
 import logging
 
 # local imports
-from app.exceptions.core import PaymentProcessorError
+from seamless_payments.app.exceptions.core import PaymentProcessorError
 
 logger = logging.getLogger(__name__)
 

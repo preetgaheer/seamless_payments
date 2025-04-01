@@ -1,7 +1,7 @@
 from typing import Literal
-from app.payment_processor.base import BasePaymentProcessor
-from app.payment_processor.paypal import PayPalPaymentProcessor
-from app.payment_processor.stripe import StripeProcessor
+from .base import BasePaymentProcessor
+from .paypal import PayPalPaymentProcessor
+from .stripe import StripeProcessor
 
 
 def get_payment_processor(processor_type: Literal["paypal", "stripe"],

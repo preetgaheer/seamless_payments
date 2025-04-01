@@ -9,10 +9,13 @@ from urllib.parse import urljoin
 import asyncio
 
 # local imports
-from app.exceptions.core import (InvoiceGenerationError, PaymentCaptureError,
-                                 PaymentProcessorError)
-from app.payment_processor.base import BasePaymentProcessor
-from app.schemas.core import (InvoiceRequest, InvoiceResponse, PaymentResponse)
+from seamless_payments.app.exceptions.core import (InvoiceGenerationError,
+                                                   PaymentCaptureError,
+                                                   PaymentProcessorError)
+from seamless_payments.app.payment_processor.base import BasePaymentProcessor
+from seamless_payments.app.schemas.core import (InvoiceRequest,
+                                                InvoiceResponse,
+                                                PaymentResponse)
 
 logger = logging.getLogger(__name__)
 
@@ -26,16 +29,17 @@ class PayPalClient:
     """Production-ready PayPal client with environment switching"""
 
     BASE_URLS = {
-        PayPalEnvironment.SANDBOX: "https://api.sandbox.paypal.com",
-        PayPalEnvironment.PRODUCTION: "https://api.paypal.com"
+        PayPalEnvironment.SANDBOX.value: "https://api.sandbox.paypal.com",
+        PayPalEnvironment.PRODUCTION.value: "https://api.paypal.com"
     }
 
-    def __init__(self,
-                 environment: PayPalEnvironment = PayPalEnvironment.SANDBOX,
-                 client_id: Optional[str] = None,
-                 client_secret: Optional[str] = None,
-                 timeout: int = 30,
-                 max_retries: int = 3):
+    def __init__(
+            self,
+            environment: PayPalEnvironment = PayPalEnvironment.SANDBOX.value,
+            client_id: Optional[str] = None,
+            client_secret: Optional[str] = None,
+            timeout: int = 30,
+            max_retries: int = 3):
         """
         Initialize PayPal client.
         
@@ -130,6 +134,7 @@ class PayPalClient:
 
         for attempt in range(self.max_retries):
             try:
+                print('payload: '*50, payload)
                 response = await self.session.request(method,
                                                       url,
                                                       json=payload,
