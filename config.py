@@ -47,11 +47,11 @@ class StripeConfig(BaseModel):
 
 
 class GlobalConfig(BaseModel):
-    timeout: int = Field(30)
-    max_retries: int = Field(3)
+    TIMEOUT: int = Field(30)
+    MAX_RETRIES: int = Field(3)
 
 
-class MetaConig(BaseModel):
-    brand_name: str = Field("My Online Store")
-    return_url: AnyUrl = Field("https://yourdomain.com/payment/return")
-    cancel_url: AnyUrl = Field("https://yourdomain.com/payment/cancel")
+class MetaConfig(BaseModel):
+    BRAND_NAME: str = Field("My Online Store")
+    RETURN_URL: AnyUrl = Field("https://yourdomain.com/payment/return")
+    CANCEL_URL: AnyUrl = Field("https://yourdomain.com/payment/cancel")
