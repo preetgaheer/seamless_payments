@@ -8,11 +8,7 @@ from pydantic import (BaseModel, Field, EmailStr, PositiveInt, field_validator,
 
 class PayPalCurrency(str, Enum):
     USD = "USD"
-    EUR = "EUR"
-    GBP = "GBP"
-    CAD = "CAD"
-    AUD = "AUD"
-    JPY = "JPY"
+    INR = "INR"
 
 
 class PayPalAddress(BaseModel):

@@ -16,6 +16,7 @@ from seamless_payments import paypal
 from seamless_payments.schemas.paypal import (PayPalCustomer,
                                               PayPalInvoiceRequest, PayPalItem,
                                               PayPalCurrency)
+from seamless_payments.db.init import db_integration
 from seamless_payments import app
 
 # Load environment variables
@@ -318,8 +319,15 @@ async def main():
 
 
 async def main3():
-    pass
+    print('Initializing db...')
+    await db_integration.initialize()
+
+
+async def main4():
+    server = uvicorn.Server(uvicorn.Config(app, host="0.0.0.0", port=8000))
+    await asyncio.gather(server.serve(), db_integration.initialize(),
+                         run_payment_flow())
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main4())

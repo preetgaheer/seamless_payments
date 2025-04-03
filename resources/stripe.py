@@ -2,6 +2,10 @@ from typing import Optional, Dict, Any
 from datetime import datetime
 import logging
 # local imports
+from seamless_payments.db.event_tracking import (PaymentEvent,
+                                                 PaymentEventType,
+                                                 track_payment_event,
+                                                 event_tracker)
 from seamless_payments.exceptions.stripe import (
     StripeCustomerCreationError,
     StripeCustomerRetrievalError,
@@ -109,30 +113,64 @@ class Invoice(_StripeResource):
     @classmethod
     async def create(
             cls, invoice_data: StripeInvoiceRequest) -> StripeInvoiceResponse:
-        """
-        Create a Stripe invoice following the correct flow:
-        1. Create draft invoice
-        2. Add invoice items
-        3. Finalize invoice
-        """
-        cls._ensure_client_initialized()
+        async with track_payment_event(
+                event_type=PaymentEventType.INVOICE_CREATED,
+                processor="stripe",
+                resource_id="pending",  # Will be updated after creation
+                status="pending",
+                amount=sum(item.price * item.quantity
+                           for item in invoice_data.items),
+                currency=invoice_data.currency.value,
+                customer_id=invoice_data.customer.id,
+                metadata={
+                    "items": [item.dict() for item in invoice_data.items],
+                    "due_date":
+                    str(invoice_data.due_date)
+                    if invoice_data.due_date else None
+                }):
+            """
+            Create a Stripe invoice following the correct flow:
+            1. Create draft invoice
+            2. Add invoice items
+            3. Finalize invoice
+            """
+            cls._ensure_client_initialized()
 
-        try:
-            # Step 1: Create draft invoice
-            draft_invoice = await cls._create_draft(invoice_data)
+            try:
+                # Step 1: Create draft invoice
+                draft_invoice = await cls._create_draft(invoice_data)
 
-            # Step 2: Add invoice items
-            await cls._add_items_to_invoice(draft_invoice["id"], invoice_data)
+                # Step 2: Add invoice items
+                await cls._add_items_to_invoice(draft_invoice["id"],
+                                                invoice_data)
 
-            # Step 3: Finalize invoice
-            finalized_invoice = await cls._finalize_invoice(draft_invoice["id"]
-                                                            )
+                # Step 3: Finalize invoice
+                finalized_invoice = await cls._finalize_invoice(
+                    draft_invoice["id"])
 
-            return cls._parse_response(finalized_invoice)
+                # Update the event with the actual invoice ID
+                await event_tracker.track_event(
+                    PaymentEvent(event_type=PaymentEventType.INVOICE_CREATED,
+                                 processor="stripe",
+                                 resource_id=finalized_invoice["id"],
+                                 status="completed",
+                                 amount=float(finalized_invoice["amount_due"] /
+                                              100),
+                                 currency=finalized_invoice["currency"],
+                                 customer_id=invoice_data.customer.id,
+                                 metadata={
+                                     "invoice_number":
+                                     finalized_invoice.get("number"),
+                                     "status":
+                                     finalized_invoice["status"]
+                                 }))
 
-        except Exception as e:
-            logger.error("Invoice creation failed", exc_info=True)
-            raise StripeInvoiceCreationError("Failed to create invoice") from e
+                return cls._parse_response(finalized_invoice)
+
+            except Exception as e:
+                logger.error("Invoice creation failed", exc_info=True)
+                raise StripeInvoiceCreationError(
+                    "Failed to create invoice") from e
 
     @classmethod
     async def _create_draft(
