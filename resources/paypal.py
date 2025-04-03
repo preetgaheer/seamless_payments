@@ -1,17 +1,17 @@
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 import logging
-
+# local imports
 from seamless_payments.exceptions.paypal import (
     PayPalInvoiceCreationError,
     PayPalPaymentCaptureError,
 )
-from seamless_payments.schemas.core import (PayPalInvoiceRequest,
-                                            PayPalInvoiceResponse,
-                                            PayPalPaymentResponse)
-from seamless_payments.payment_processors.paypal import PayPalClient
+from seamless_payments.schemas.paypal import (PayPalInvoiceRequest,
+                                              PayPalInvoiceResponse,
+                                              PayPalPaymentResponse)
+from seamless_payments.clients.paypal import PayPalClient
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('paypal')
 
 
 class _PayPalResource:
@@ -32,7 +32,7 @@ class _PayPalResource:
                     "PayPal not configured. Set paypal.client_id and paypal.client_secret"
                 )
 
-            print('paypal.timeout: ', paypal.timeout)
+            logger.info(f'paypal.timeout: {paypal.timeout}')
             cls._client = PayPalClient()
             cls._client.configure(
                 client_id=paypal.client_id,

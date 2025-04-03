@@ -107,7 +107,7 @@ class PayPalInvoiceResponse(BaseModel):
     # metadata: Dict[str, str] = Field(
     #     default_factory=dict,
     #     description="Metadata associated with the invoice")
-    
+
     invoice_id: str
     payment_url: Optional[str] = None
     status: str
@@ -127,7 +127,7 @@ class PayPalOrderResponse(BaseModel):
         ..., description="HATEOAS links for order actions")
     metadata: Dict[str, str] = Field(
         default_factory=dict, description="Metadata associated with the order")
-    
+
     # payment_id: str
     # invoice_id: str
     # amount: float
@@ -150,7 +150,7 @@ class PayPalPaymentResponse(BaseModel):
     # captured_at: datetime
     # links: List[Dict[str, str]] = Field(
     #     default_factory=list, description="HATEOAS links for payment actions")
-    
+
     payment_id: str
     invoice_id: str
     amount: float

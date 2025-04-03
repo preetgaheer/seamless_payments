@@ -1,9 +1,10 @@
 import logging
 from typing import Optional, Dict, Any
+# external imports
 import httpx
 from urllib.parse import urljoin
 import asyncio
-
+# local imports
 from seamless_payments.exceptions.stripe import (StripeConfigurationError,
                                                  StripeAuthenticationError,
                                                  StripeAPIError)
@@ -73,13 +74,15 @@ class StripeClient:
                 data = None
                 if payload and method == "POST":
                     data = cls._form_encode(payload)
+                if payload and method == "GET":
+                    data = cls._form_encode(payload)
 
-                response = await cls._session.request(method,
-                                                      url,
-                                                      data=data,
-                                                      headers=headers)
-                print('data: ', data)
-
+                response = await cls._session.request(
+                    method,
+                    url,
+                    data=data if method == "POST" else None,
+                    headers=headers,
+                    params=data if method == "GET" else None)
                 if response.status_code == 401:
                     raise StripeAuthenticationError(
                         "Invalid API key provided",

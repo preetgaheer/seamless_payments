@@ -1,7 +1,7 @@
 from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
-
+# local imports
 from seamless_payments.exceptions.stripe import (
     StripeCustomerCreationError,
     StripeCustomerRetrievalError,
@@ -12,7 +12,7 @@ from seamless_payments.exceptions.stripe import (
 from seamless_payments.schemas.stripe import (
     StripeCustomer, StripeCustomerRequest, StripeInvoiceItemRequest,
     StripeInvoiceRequest, StripeInvoiceResponse, StripePaymentResponse)
-from seamless_payments.payment_processors.stripe import StripeClient
+from seamless_payments.clients.stripe import StripeClient
 
 logger = logging.getLogger(__name__)
 
@@ -248,8 +248,8 @@ class PaymentIntent(_StripeResource):
     @classmethod
     async def update(cls, payment_intent_id: str, *args,
                      **kwargs) -> Dict[str, Any]:
-        print('kwargs: ', kwargs)
-        """Attach a payment method to an existing PaymentIntent, or update other attributes dynamically"""
+        """Attach a payment method to an existing PaymentIntent, or 
+        update other attributes dynamically"""
         if cls._client is None:
             raise ValueError(
                 "Stripe not configured. Call stripe.configure() first")
@@ -265,7 +265,6 @@ class PaymentIntent(_StripeResource):
         for key, value in kwargs.items():
             if key != 'payment_method_id':  # Avoid duplicating the payment_method_id key
                 payload[key] = value
-        print('payload: ', payload)
 
         response = await cls._client._make_request(
             "POST", f"/v1/payment_intents/{payment_intent_id}", payload)
@@ -321,8 +320,6 @@ class PaymentIntent(_StripeResource):
         """Confirm and then capture a PaymentIntent"""
         # First confirm the payment intent
         confirm_response = await cls.confirm(payment_intent_id)
-        print('confirm_response: ', confirm_response)
-
         # Then capture the payment if confirmation was successful
         if confirm_response["status"] == "requires_capture":
             capture_response = await cls.capture(payment_intent_id)
@@ -339,34 +336,29 @@ class Customer(_StripeResource):
     _brand_name: str = None
 
     @classmethod
-    async def create(cls,
-                     customer_data: StripeCustomerRequest) -> StripeCustomer:
-        """Create a new Stripe customer"""
+    async def create_or_get(
+            cls, customer_data: StripeCustomerRequest) -> StripeCustomer:
+        """Create a new Stripe customer or retrieve existing one"""
         cls._ensure_client_initialized()
 
         try:
             payload = {
-                "name":
-                customer_data.name,
-                "email":
-                customer_data.email,
-                "phone":
-                customer_data.phone,
-                "description":
-                customer_data.description or "Customer created via API",
+                "name": customer_data.name,
+                "email": customer_data.email,
+                "phone": customer_data.phone
             }
             response = await cls._client._make_request(
                 "POST",
                 "/v1/customers",
                 payload,
-                idempotency_key=f"CUST-{customer_data.email}")
-
+                idempotency_key=f"CUST-{customer_data.email}",
+            )
             if not response or "id" not in response:
                 raise StripeCustomerCreationError(
                     "Failed to create Stripe customer")
 
             return StripeCustomer(
-                customer_id=response["id"],
+                id=response["id"],
                 name=response.get("name"),
                 email=response.get("email"),
                 phone=response.get("phone"),
@@ -374,6 +366,11 @@ class Customer(_StripeResource):
             )
 
         except Exception as e:
+            error_message = str(e)
+            if "already exists" in error_message or "duplicate" in error_message:
+                # Customer already exists, retrieve the existing customer
+                return await cls.get(email=customer_data.email)
+
             logger.error("Customer creation failed", exc_info=True)
             raise StripeCustomerCreationError(
                 "Failed to create customer") from e
@@ -390,12 +387,23 @@ class Customer(_StripeResource):
                 response = await cls._client._make_request(
                     "GET", f"/v1/customers/{customer_id}")
             elif email:
+                search_query = f"email:'{email}'"
                 search_response = await cls._client._make_request(
-                    "GET", "/v1/customers", {"email": email})
+                    "GET", "/v1/customers/search", {"query": search_query})
+
                 if not search_response.get("data"):
                     raise StripeCustomerRetrievalError(
                         f"No customer found with email {email}")
-                response = search_response["data"][0]
+
+                customer = search_response["data"][
+                    0]  # Exact match from search
+                return StripeCustomer(
+                    id=customer["id"],
+                    name=customer.get("name"),
+                    email=customer.get("email"),
+                    phone=customer.get("phone"),
+                    created_at=datetime.fromtimestamp(customer["created"]),
+                )
             else:
                 raise ValueError(
                     "Either customer_id or email must be provided")

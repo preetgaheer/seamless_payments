@@ -4,7 +4,7 @@ from typing import Optional
 from seamless_payments.config import GlobalConfig, MetaConfig, PayPalConfig
 
 # local imports
-from seamless_payments.payment_processors.paypal import PayPalClient
+from seamless_payments.clients.paypal import PayPalClient
 from seamless_payments.resources.paypal import Invoice, Order
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,6 @@ def _initialize_client():
         RETURN_URL=return_url,
         CANCEL_URL=cancel_url,
     )
-
     _client = PayPalClient(environment=paypal_config.PAYPAL_ENVIRONMENT,
                            client_id=paypal_config.PAYPAL_CLIENT_ID,
                            client_secret=paypal_config.PAYPAL_CLIENT_SECRET,

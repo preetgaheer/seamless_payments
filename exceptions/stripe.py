@@ -53,8 +53,6 @@ class StripeCustomerRetrievalError(StripeError):
     pass
 
 
-
-
 class StripeInvoiceItemCreationError(StripeError):
     """Raised when customer creation fails"""
     pass

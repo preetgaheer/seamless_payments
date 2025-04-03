@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 # local imports
-from seamless_payments.schemas.core import (
+from seamless_payments.schemas.paypal import (
     InvoiceRequest,
     InvoiceResponse,
     PaymentCaptureRequest,

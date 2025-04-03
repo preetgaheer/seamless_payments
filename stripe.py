@@ -4,7 +4,7 @@ from typing import Optional
 from seamless_payments.config import GlobalConfig, MetaConfig, StripeConfig
 
 # Local imports
-from seamless_payments.payment_processors.stripe import StripeClient
+from seamless_payments.clients.stripe import StripeClient
 from seamless_payments.resources.stripe import Invoice, PaymentIntent, Customer
 
 logger = logging.getLogger(__name__)

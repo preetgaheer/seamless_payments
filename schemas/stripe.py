@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 class StripeCurrency(str, Enum):
     USD = "usd"
-    EUR = "inr"
+    INR = "inr"
 
 
 class StripeCustomer(BaseModel):
