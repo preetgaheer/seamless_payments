@@ -1,5 +1,5 @@
 from typing import Optional, Union
-import os
+# local imports
 from .schemas import DatabaseType
 from .base import DatabaseInterface
 from .model import SQLAlchemyDatabase
@@ -15,7 +15,8 @@ class DatabaseFactory:
                         db_host: Optional[str] = None,
                         db_port: Optional[int] = None,
                         db_path: Optional[str] = None) -> DatabaseInterface:
-        """Factory method to create appropriate database instance with SQLAlchemy"""
+        """Factory method to create appropriate database instance 
+        with SQLAlchemy"""
         if isinstance(db_type, str):
             db_type = DatabaseType(db_type.lower())
 

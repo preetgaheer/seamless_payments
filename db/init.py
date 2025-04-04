@@ -39,35 +39,26 @@ class DatabaseIntegration:
 
         # Map event to transaction record
         transaction_data = {
-            "transaction_id": event.resource_id,
+            "transaction_id": event.transaction_id,
+            "event_id": event.event_id,
+            "event_type": event.event_type.value,
             "payment_processor": event.processor,
+            "resource_id": event.resource_id,
             "amount": event.amount,
             "currency": event.currency,
             "status": self._map_event_to_status(event),
             "customer_id": event.customer_id,
-            "metadata": {
+            "processor_metadata": {
                 "event_type": event.event_type.value,
                 **event.metadata
-            }
+            },
+            "parent_event_id": event.parent_event_id,
+            "metadata": {}
         }
         transaction_data = TransactionBase(**transaction_data)
 
         try:
-            # Check if transaction exists
-            existing = await self._db.get_transaction(
-                transaction_id=event.resource_id,
-                payment_processor=event.processor)
-
-            if existing:
-                # Update existing transaction
-                if existing.status != transaction_data.status:
-                    await self._db.update_transaction_status(
-                        transaction_id=event.resource_id,
-                        status=transaction_data.status,
-                        payment_processor=event.processor)
-            else:
-                # Create new transaction
-                await self._db.create_transaction(transaction_data)
+            await self._db.create_transaction(transaction_data)
         except Exception as e:
             logger.error(f"Failed to record payment event: {e}", exc_info=True)
 

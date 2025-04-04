@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class StripeCurrency(str, Enum):
@@ -63,6 +63,12 @@ class StripeInvoiceRequest(BaseModel):
         description="'charge_automatically' or 'send_invoice'")
     days_until_due: int = Field(
         30, description="Number of days until invoice is due")
+
+    @computed_field
+    @property
+    def total_amount(self) -> float:
+        """Sum of all item prices multiplied by their quantities"""
+        return sum(item.price * item.quantity for item in self.items)
 
     # @validator('days_until_due')
     # def validate_days_until_due(cls, v):
@@ -138,77 +144,63 @@ class StripeInvoiceItemRequest(BaseModel):
     customer_id: str = Field(
         ...,
         description="The ID of the customer who will be billed",
-        example="cus_ABC123456789"
-    )
-    
+        example="cus_ABC123456789")
+
     # Price reference (either price_id or amount+currency+product info must be provided)
     price_id: Optional[str] = Field(
         None,
         description="The ID of an existing price to use",
-        example="price_ABC123456789"
-    )
-    
+        example="price_ABC123456789")
+
     # Ad-hoc pricing fields (used when price_id is not provided)
     amount: Optional[float] = Field(
         None,
-        description="The unit amount in the currency's smallest unit (e.g. cents for USD)",
+        description=
+        "The unit amount in the currency's smallest unit (e.g. cents for USD)",
         gt=0,
-        example=1000.00
-    )
+        example=1000.00)
     currency: Optional[StripeCurrency] = Field(
         None,
         description="Three-letter ISO currency code",
-        example=StripeCurrency.USD
-    )
+        example=StripeCurrency.USD)
     product_name: Optional[str] = Field(
         None,
         description="The product's name for ad-hoc items",
         max_length=300,
-        example="Premium Subscription"
-    )
+        example="Premium Subscription")
     product_description: Optional[str] = Field(
         None,
         description="The product's description for ad-hoc items",
         max_length=1000,
-        example="Annual subscription plan"
-    )
-    
+        example="Annual subscription plan")
+
     # Common fields
-    quantity: int = Field(
-        1,
-        description="Quantity of this item",
-        gt=0,
-        example=2
-    )
+    quantity: int = Field(1,
+                          description="Quantity of this item",
+                          gt=0,
+                          example=2)
     description: Optional[str] = Field(
         None,
         description="A description of this invoice item",
         max_length=1000,
-        example="Annual subscription for 2023"
-    )
+        example="Annual subscription for 2023")
     period_start: Optional[datetime] = Field(
-        None,
-        description="Start of the billing period for this item"
-    )
+        None, description="Start of the billing period for this item")
     period_end: Optional[datetime] = Field(
-        None,
-        description="End of the billing period for this item"
-    )
+        None, description="End of the billing period for this item")
     metadata: Optional[Dict[str, str]] = Field(
         None,
         description="Key-value pairs for storing additional information",
-        example={"project_id": "proj_123", "department": "marketing"}
-    )
+        example={
+            "project_id": "proj_123",
+            "department": "marketing"
+        })
     tax_rates: Optional[List[str]] = Field(
         None,
         description="List of tax rate IDs to apply to this item",
-        example=["txr_123", "txr_456"]
-    )
+        example=["txr_123", "txr_456"])
     discountable: Optional[bool] = Field(
-        None,
-        description="Whether discounts apply to this item",
-        example=True
-    )
+        None, description="Whether discounts apply to this item", example=True)
 
     # # Validators
     # @validator('amount')
@@ -233,10 +225,10 @@ class StripeInvoiceItemRequest(BaseModel):
     # def dict(self, **kwargs):
     #     """Override dict to handle special cases"""
     #     data = super().dict(**kwargs)
-        
+
     #     # Convert amount to cents if present
     #     if 'amount' in data and data['amount'] is not None:
     #         data['amount'] = int(data['amount'] * 100)
-            
+
     #     # Remove None values
     #     return {k: v for k, v in data.items() if v is not None}

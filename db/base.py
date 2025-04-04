@@ -28,16 +28,20 @@ class DatabaseInterface(ABC):
             self, transaction: TransactionCreate) -> TransactionModel:
         pass
 
-    @abstractmethod
-    async def update_transaction_status(
-            self, transaction_id: str, status: str,
-            payment_processor: str) -> Optional[TransactionModel]:
-        pass
 
     @abstractmethod
     async def get_transaction(
             self, transaction_id: str,
             payment_processor: str) -> Optional[TransactionModel]:
+        pass
+    
+    @abstractmethod
+    async def get_resource_records(
+        self,
+        resource_id: str,
+        processor: str
+    ) -> List[TransactionModel]:
+        """Get all records for a specific resource"""
         pass
 
     @abstractmethod

@@ -1,4 +1,5 @@
 from typing import Optional, Dict, Any
+import uuid
 from pydantic import BaseModel, Field
 from enum import Enum
 import logging
@@ -15,17 +16,34 @@ class DatabaseType(str, Enum):
 
 
 class TransactionStatus(str, Enum):
+    PARTIALLY_REFUNDED = "partially_refunded"
+    STARTED = "started"
     PENDING = "pending"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     REFUNDED = "refunded"
-    PARTIALLY_REFUNDED = "partially_refunded"
+    COMPLETED = "completed"
 
 
 class TransactionBase(BaseModel):
+    # id: Optional[str] = Field(
+    #     default_factory=lambda: str(uuid.uuid4()),
+    #     description="Unique ID for this database record"
+    # )
     transaction_id: str = Field(
-        ..., description="Unique transaction ID from payment processor")
+        ...,
+        description="Unique ID for the entire transaction session"
+    )
+    event_id: str = Field(
+        ...,
+        description="Unique ID for this specific event"
+    )
+    event_type: str = Field(..., description="Type of payment event")
     payment_processor: str = Field(..., description="Stripe or PayPal")
+    resource_id: str = Field(
+        ...,
+        description="ID of the specific resource (invoice, payment intent, etc.)"
+    )
     amount: float = Field(..., description="Transaction amount")
     currency: str = Field(..., description="Currency code")
     status: TransactionStatus = Field(..., description="Transaction status")
@@ -36,6 +54,13 @@ class TransactionBase(BaseModel):
     metadata: Optional[Dict[str,
                             Any]] = Field(default=None,
                                           description="Additional metadata")
+    processor_metadata: Optional[Dict[str, Any]] = Field(
+        default=None, description="Metadata from payment processor")
+    parent_event_id: Optional[str] = Field(
+        None,
+        description="Reference to parent event in this transaction"
+    )
+
 
     model_config = ConfigDict(
         from_attributes=True,  # Previously orm_mode=True
@@ -48,9 +73,12 @@ class TransactionCreate(TransactionBase):
 
 
 class TransactionModel(TransactionBase):
-    id: int = Field(..., description="Primary key")
+    id: Optional[str] = Field(
+        default_factory=lambda: str(uuid.uuid4()),
+        description="Unique ID for this database record"
+    )
     created_at: datetime = Field(..., description="Creation timestamp")
-    updated_at: datetime = Field(..., description="Last update timestamp")
+    # updated_at: datetime = Field(..., description="Last update timestamp")
 
     class Config:
         orm_mode = True
