@@ -114,8 +114,9 @@ class Invoice(_StripeResource):
     """Handles creation and management of Stripe invoices"""
 
     @classmethod
-    async def create(
-            cls, invoice_data: StripeInvoiceRequest) -> StripeInvoiceResponse:
+    async def create(cls,
+                     invoice_data: StripeInvoiceRequest,
+                     transction_id: str = None) -> StripeInvoiceResponse:
         """
         Create a Stripe invoice following the correct flow:
         1. Create draft invoice
@@ -123,33 +124,38 @@ class Invoice(_StripeResource):
         3. Finalize invoice
         """
         cls._ensure_client_initialized()
+        invoice_data.metadata = invoice_data.metadata | {
+            "transaction_id": transction_id
+        }
 
         try:
             # Step 1: Create draft invoice
             draft_invoice = await cls._create_draft(invoice_data)
             await event_tracker.track_event(
-                PaymentEvent(
-                    event_type=PaymentEventType.INVOICE_CREATED,
-                    processor="stripe",
-                    resource_id=draft_invoice["id"],
-                    status="completed",
-                    amount=float(draft_invoice["amount_due"] / 100),
-                    currency=draft_invoice["currency"],
-                    customer_id=invoice_data.customer.id,
-                    processor_metadata={
-                        "invoice_number": draft_invoice.get("number"),
-                        "status": draft_invoice["status"]
-                    },
-                    metadata={}))
+                PaymentEvent(event_type=PaymentEventType.INVOICE_CREATED,
+                             processor="stripe",
+                             transaction_id=transction_id,
+                             resource_id=draft_invoice["id"],
+                             status="completed",
+                             amount=float(draft_invoice["amount_due"] / 100),
+                             currency=draft_invoice["currency"],
+                             customer_id=invoice_data.customer.id,
+                             processor_metadata={
+                                 "invoice_number": draft_invoice.get("number"),
+                                 "status": draft_invoice["status"]
+                             },
+                             metadata={}))
 
             # Step 2: Add invoice items
-            await cls._add_items_to_invoice(draft_invoice["id"], invoice_data, invoice=draft_invoice)
+            await cls._add_items_to_invoice(draft_invoice["id"],
+                                            invoice_data,
+                                            invoice=draft_invoice)
 
             # Step 3: Finalize invoice
             finalized_invoice = await cls._finalize_invoice(draft_invoice["id"]
                                                             )
 
-            # Update the event with the actual invoice ID
+            # Update the event with the actual invoice ID idempotency keys
             await event_tracker.track_event(
                 PaymentEvent(
                     event_type=PaymentEventType.INVOICE_FINALISED,
@@ -199,8 +205,9 @@ class Invoice(_StripeResource):
         return response
 
     @classmethod
-    async def _add_items_to_invoice(
-            cls, invoice_id: str, invoice_data: StripeInvoiceRequest, invoice) -> None:
+    async def _add_items_to_invoice(cls, invoice_id: str,
+                                    invoice_data: StripeInvoiceRequest,
+                                    invoice) -> None:
         """Add all items to the invoice using InvoiceItem resource"""
         for item in invoice_data.items:
             item_request = StripeInvoiceItemRequest(
@@ -211,21 +218,23 @@ class Invoice(_StripeResource):
                 quantity=item.quantity,
                 product_name=item.name,
                 product_description=item.description,
-                # metadata=item.metadata,
+                metadata=invoice_data.metadata,
                 # price_id=item.price_id  # Optional, if using predefined prices
             )
             invoice_item = await InvoiceItem.create(item_request,
                                                     invoice_id=invoice_id)
             await event_tracker.track_event(
-                PaymentEvent(event_type=PaymentEventType.INVOICE_ITEM_CREATED,
-                             processor="stripe",
-                             resource_id=invoice_item["id"],
-                             status="completed",
-                             amount=float(invoice["amount_due"] / 100),
-                             currency=invoice_data.currency,
-                             customer_id=invoice_data.customer.id,
-                             processor_metadata={"data": invoice_data},
-                             metadata={}))
+                PaymentEvent(
+                    event_type=PaymentEventType.INVOICE_ITEM_CREATED,
+                    processor="stripe",
+                    transaction_id=invoice_data.metadata["transaction_id"],
+                    resource_id=invoice_item["id"],
+                    status="completed",
+                    amount=float(invoice["amount_due"] / 100),
+                    currency=invoice_data.currency,
+                    customer_id=invoice_data.customer.id,
+                    processor_metadata={"data": invoice_data},
+                    metadata={}))
 
     @classmethod
     async def _finalize_invoice(cls, invoice_id: str) -> Dict[str, Any]:
@@ -384,9 +393,11 @@ class Customer(_StripeResource):
     _brand_name: str = None
 
     @classmethod
-    async def create_or_get(
-            cls, customer_data: StripeCustomerRequest) -> StripeCustomer:
+    async def create_or_get(cls,
+                            customer_data: StripeCustomerRequest,
+                            transction_id: str = None) -> StripeCustomer:
         """Create a new Stripe customer or retrieve existing one"""
+        print('transction_id: RRRRRRRR', transction_id)
         cls._ensure_client_initialized()
 
         try:
@@ -400,7 +411,7 @@ class Customer(_StripeResource):
                 "/v1/customers",
                 payload,
                 idempotency_key=f"CUST-{customer_data.email}",
-            )
+                transction_id=transction_id)
             if not response or "id" not in response:
                 raise StripeCustomerCreationError(
                     "Failed to create Stripe customer")

@@ -55,7 +55,7 @@ class StripeInvoiceRequest(BaseModel):
     due_date: Optional[datetime] = Field(None,
                                          description="When the invoice is due")
     description: Optional[str] = None
-    metadata: Optional[Dict[str, str]] = None
+    metadata: Optional[Dict[str, str]] = {}
     auto_advance: bool = Field(
         True, description="Whether to automatically advance the invoice")
     collection_method: str = Field(

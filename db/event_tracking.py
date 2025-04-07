@@ -14,7 +14,7 @@ class PaymentEventType(str, Enum):
     # Expanded event types
     TRANSACTION_STARTED = "transaction_started"
     INVOICE_CREATED = "invoice_created"
-    INVOICE_FINALISED =  "invoice_finalised"
+    INVOICE_FINALISED = "invoice_finalised"
     INVOICE_ITEM_CREATED = "invoice_item_created"
     PAYMENT_INTENT_CREATED = "payment_intent_created"
     PAYMENT_METHOD_ATTACHED = "payment_method_attached"
@@ -75,8 +75,8 @@ class PaymentEventTracker:
             except Exception as e:
                 logger.error(f"Error in event handler {handler.__name__}: {e}")
 
-    def get_current_transaction_id(self, resource_id: str) -> Optional[str]:
-        return self._current_transactions.get(resource_id)
+    # def get_current_transaction_id(self, resource_id: str) -> Optional[str]:
+    #     return self._current_transactions.get(resource_id)
 
     def start_transaction(self, resource_id: str, transaction_id: str):
         self._current_transactions[resource_id] = transaction_id
@@ -91,6 +91,7 @@ event_tracker = PaymentEventTracker()
 
 @asynccontextmanager
 async def track_payment_event(event_type: PaymentEventType,
+                              transaction_id: str,
                               processor: str,
                               resource_id: str,
                               status: str,
@@ -98,17 +99,15 @@ async def track_payment_event(event_type: PaymentEventType,
                               **kwargs) -> AsyncGenerator[PaymentEvent, None]:
     """Context manager for payment events with transaction tracking"""
     # Get or create transaction ID
-    transaction_id = event_tracker.get_current_transaction_id(resource_id)
+
     parent_event_id = None
 
     if parent_resource_id:
-        transaction_id = event_tracker.get_current_transaction_id(
-            parent_resource_id)
         parent_event_id = f"{parent_resource_id}-{event_type.value}"
 
-    if not transaction_id:
-        transaction_id = str(uuid.uuid4())
-        event_tracker.start_transaction(resource_id, transaction_id)
+    # if not transaction_id:
+    #     transaction_id = str(uuid.uuid4())
+    #     event_tracker.start_transaction(resource_id, transaction_id)
 
     event = PaymentEvent(transaction_id=transaction_id,
                          event_type=event_type,

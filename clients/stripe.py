@@ -49,13 +49,17 @@ class StripeClient:
 
     @classmethod
     async def _make_request(
-            cls,
-            method: str,
-            endpoint: str,
-            payload: Optional[Dict[str, Any]] = None,
-            idempotency_key: Optional[str] = None) -> Dict[str, Any]:
+        cls,
+        method: str,
+        endpoint: str,
+        payload: Optional[Dict[str, Any]] = None,
+        idempotency_key: Optional[str] = None,
+        transction_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Make authenticated request to Stripe API"""
         cls._ensure_configured()
+        if payload and hasattr(payload, 'metadata'):
+            payload['metadata']['transaction_id'] = transction_id
 
         headers = {
             "Authorization": f"Bearer {cls._api_key}",

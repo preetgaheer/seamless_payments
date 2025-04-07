@@ -8,6 +8,7 @@ import uvicorn
 import webbrowser
 
 # local imports
+from seamless_payments.manager import payment_transaction
 import seamless_payments.stripe as stripe
 from seamless_payments.schemas.stripe import (StripeCustomerRequest,
                                               StripeInvoiceRequest, StripeItem,
@@ -209,23 +210,24 @@ async def run_payment_flow():
     print("Stripe configured successfully!")
     print("Getting customer...")
     # Create or retrieve customer
-    customer_email = "johnjonga@example.com"
-    customer = await stripe.Customer.create_or_get(
-        StripeCustomerRequest(name="John Doe",
-                              email=customer_email,
-                              phone="+1234567890"))
+    async with payment_transaction() as txn:
+        customer_email = "johnjonga@example.com"
+        customer = await txn.add(lambda txn_id: stripe.Customer.create_or_get(
+            StripeCustomerRequest(name="John Doe",
+                                  email=customer_email,
+                                  phone="+1234567890"), txn_id))
 
-    print('creating invoice ...')
-    print('customer: ', customer)
-    # Create invoice
-    invoice = await stripe.Invoice.create(
-        StripeInvoiceRequest(
-            customer=customer,
-            items=[StripeItem(name="Product 1", price=100, quantity=2)],
-            currency=StripeCurrency.INR.value,
-            notes="Thank you for your business!",
-            due_date=datetime.now() + timedelta(days=10)))
-    print(f"Invoice created! ID: {invoice.id}")
+        print('creating invoice ...')
+        print('customer: ', customer)
+        # Create invoice
+        invoice = await txn.add(lambda txn_id: stripe.Invoice.create(
+            StripeInvoiceRequest(
+                customer=customer,
+                items=[StripeItem(name="Product 1", price=15.42, quantity=2)],
+                currency=StripeCurrency.INR.value,
+                notes="Thank you for your business!",
+                due_date=datetime.now() + timedelta(days=10)), txn_id))
+        print(f"Invoice created! ID: {invoice.id}")
 
     # Create PaymentIntent from invoice
     print("Creating PaymentIntent from invoice ...")
