@@ -251,7 +251,7 @@ class Order(_PayPalResource):
             "POST", "/v2/checkout/orders", payload, idempotency_key=invoice.invoice_id
         )
 
-        print('response: cdfaDG', response)
+        print("response: cdfaDG", response)
         approval_url = next(
             link["href"] for link in response["links"] if link["rel"] == "payer-action"
         )
@@ -277,7 +277,9 @@ class Order(_PayPalResource):
         }
 
     @classmethod
-    async def capture(cls, order_id: str, invoice_id: str) -> PayPalPaymentResponse:
+    async def capture(
+        cls, order_id: str, invoice_id: str, transaction_id: Optional[str]
+    ) -> PayPalPaymentResponse:
         """Capture an authorized payment"""
         if cls._client is None:
             raise ValueError(
@@ -293,7 +295,7 @@ class Order(_PayPalResource):
         if capture.get("status") != "COMPLETED":
             raise PayPalPaymentCaptureError("Payment not completed")
 
-        return PayPalPaymentResponse(
+        res = PayPalPaymentResponse(
             payment_id=capture["id"],
             invoice_id=invoice_id,
             amount=float(
@@ -307,3 +309,20 @@ class Order(_PayPalResource):
             status="COMPLETED",
             captured_at=datetime.now(),
         )
+        await event_tracker.track_event(
+            PaymentEvent(
+                event_type=PaymentEventType.PAYPAL_ORDER_CAPTURED,
+                processor="paypal",
+                transaction_id=transaction_id,
+                resource_id=res.payment_id,
+                status="succeeded",
+                amount=res.amount,
+                currency=res.currency,
+                customer_id="",
+                processor_metadata={"data": ""},
+                metadata={},
+                payment_status="paid",
+            )
+        )
+
+        return res

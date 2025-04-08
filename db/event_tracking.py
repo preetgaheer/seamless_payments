@@ -33,6 +33,7 @@ class PaymentEventType(str, Enum):
 
     PAYPAL_ORDER_CREATED = "paypal_order_created"
     PAYPAL_INVOICE_CREATED = "paypal_invoice_created"
+    PAYPAL_ORDER_CAPTURED = "paypal_order_captured"
 
 
 class PaymentEvent(BaseModel):

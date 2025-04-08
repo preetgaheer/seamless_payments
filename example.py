@@ -227,7 +227,6 @@ async def run_payment_flow():
                 txn_id,
             )
         )
-
         print("customer: ", customer)
         print("creating invoice ...")
         # Create invoice
@@ -253,6 +252,7 @@ async def run_payment_flow():
             )
         )
         print(f"PaymentIntent created! ID: {payment_intent['payment_intent_id']}")
+
     payment_intent_data = payment_intent
     print("payment_intent_data: ", payment_intent_data)
     # Open payment page
