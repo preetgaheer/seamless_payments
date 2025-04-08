@@ -58,7 +58,8 @@ class StripeClient:
     ) -> Dict[str, Any]:
         """Make authenticated request to Stripe API"""
         cls._ensure_configured()
-        if payload and hasattr(payload, 'metadata'):
+        if payload and hasattr(payload, 'metadata') and not hasattr(
+                payload['metadata'], 'transaction_id'):
             payload['metadata']['transaction_id'] = transction_id
 
         headers = {

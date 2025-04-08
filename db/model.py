@@ -72,7 +72,7 @@ class SQLAlchemyDatabase(DatabaseInterface):
 
     async def create_transaction(
             self, transaction: TransactionCreate) -> TransactionModel:
-        now = datetime.utcnow()
+        now = datetime.now()
         stmt = insert(transactions).values(
             # id=transaction.id,
             transaction_id=transaction.transaction_id,

@@ -1,17 +1,25 @@
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 import logging
+
 # local imports
+from seamless_payments.db.event_tracking import (
+    PaymentEvent,
+    PaymentEventType,
+    event_tracker,
+)
 from seamless_payments.exceptions.paypal import (
     PayPalInvoiceCreationError,
     PayPalPaymentCaptureError,
 )
-from seamless_payments.schemas.paypal import (PayPalInvoiceRequest,
-                                              PayPalInvoiceResponse,
-                                              PayPalPaymentResponse)
+from seamless_payments.schemas.paypal import (
+    PayPalInvoiceRequest,
+    PayPalInvoiceResponse,
+    PayPalPaymentResponse,
+)
 from seamless_payments.clients.paypal import PayPalClient
 
-logger = logging.getLogger('paypal')
+logger = logging.getLogger("paypal")
 
 
 class _PayPalResource:
@@ -27,12 +35,13 @@ class _PayPalResource:
         """Initialize client if not already done"""
         if cls._client is None:
             from .. import paypal  # Import the main module
+
             if not paypal.client_id or not paypal.client_secret:
                 raise ValueError(
                     "PayPal not configured. Set paypal.client_id and paypal.client_secret"
                 )
 
-            logger.info(f'paypal.timeout: {paypal.timeout}')
+            logger.info(f"paypal.timeout: {paypal.timeout}")
             cls._client = PayPalClient()
             cls._client.configure(
                 client_id=paypal.client_id,
@@ -56,7 +65,8 @@ class Invoice(_PayPalResource):
 
     @classmethod
     async def create(
-            cls, invoice_data: PayPalInvoiceRequest) -> PayPalInvoiceResponse:
+        cls, invoice_data: PayPalInvoiceRequest, transaction_id: str
+    ) -> PayPalInvoiceResponse:
         """Create a PayPal invoice"""
         cls._ensure_client_initialized()
 
@@ -68,13 +78,28 @@ class Invoice(_PayPalResource):
                 "POST",
                 "/v2/invoicing/invoices",
                 payload,
-                idempotency_key=f"INV-{int(datetime.now().timestamp())}")
+                idempotency_key=f"INV-{int(datetime.now().timestamp())}",
+            )
 
             if not response or "id" not in response:
-                raise PayPalInvoiceCreationError(
-                    "Failed to create PayPal invoice")
+                raise PayPalInvoiceCreationError("Failed to create PayPal invoice")
 
-            return cls._parse_response(response)
+            res = cls._parse_response(response)
+            await event_tracker.track_event(
+                PaymentEvent(
+                    event_type=PaymentEventType.PAYPAL_INVOICE_CREATED,
+                    processor="paypal",
+                    transaction_id=transaction_id,
+                    resource_id=res.invoice_id,
+                    status="succeeded",
+                    amount=res.amount_due,
+                    currency=res.currency,
+                    customer_id="",
+                    processor_metadata={"data": response},
+                    metadata=response.get("metadata", {}),
+                )
+            )
+            return res
 
         except Exception as e:
             logger.error("Invoice creation failed", exc_info=True)
@@ -88,17 +113,19 @@ class Invoice(_PayPalResource):
             raise ValueError("Due date must be in the future")
 
     @classmethod
-    def _build_payload(cls,
-                       invoice_data: PayPalInvoiceRequest) -> Dict[str, Any]:
+    def _build_payload(cls, invoice_data: PayPalInvoiceRequest) -> Dict[str, Any]:
         """Build the request payload for invoice creation"""
-        name_parts = invoice_data.customer.name.strip().split(' ', 1)
+        name_parts = invoice_data.customer.name.strip().split(" ", 1)
         given_name = name_parts[0]
         surname = name_parts[1] if len(name_parts) > 1 else given_name
 
         invoice_date = datetime.now()
         due_date = invoice_data.due_date or invoice_date + timedelta(days=10)
-        term_type = "NET_10" if (
-            due_date - invoice_date).days == 10 else "DUE_ON_DATE_SPECIFIED"
+        term_type = (
+            "NET_10"
+            if (due_date - invoice_date).days == 10
+            else "DUE_ON_DATE_SPECIFIED"
+        )
 
         payload = {
             "detail": {
@@ -106,34 +133,36 @@ class Invoice(_PayPalResource):
                 "currency_code": invoice_data.currency.value,
                 "note": invoice_data.notes or "Thank you for your business",
                 "terms": "Payment due upon receipt",
-                "invoice_date": invoice_date.strftime('%Y-%m-%d'),
+                "invoice_date": invoice_date.strftime("%Y-%m-%d"),
                 "payment_term": {
                     "term_type": term_type,
-                    "due_date": due_date.strftime('%Y-%m-%d')
-                }
-            },
-            "primary_recipients": [{
-                "billing_info": {
-                    "name": {
-                        "given_name": given_name,
-                        "surname": surname
-                    },
-                    "email_address":
-                    invoice_data.customer.email,
-                    "phones":
-                    cls._format_phone_numbers(invoice_data.customer.phone)
-                }
-            }],
-            "items": [{
-                "name": item.name,
-                "description": item.description or "",
-                "quantity": str(item.quantity),
-                "unit_amount": {
-                    "currency_code": invoice_data.currency.value,
-                    "value": f"{item.price:.2f}"
+                    "due_date": due_date.strftime("%Y-%m-%d"),
                 },
-                "unit_of_measure": "QUANTITY"
-            } for item in invoice_data.items]
+            },
+            "primary_recipients": [
+                {
+                    "billing_info": {
+                        "name": {"given_name": given_name, "surname": surname},
+                        "email_address": invoice_data.customer.email,
+                        "phones": cls._format_phone_numbers(
+                            invoice_data.customer.phone
+                        ),
+                    }
+                }
+            ],
+            "items": [
+                {
+                    "name": item.name,
+                    "description": item.description or "",
+                    "quantity": str(item.quantity),
+                    "unit_amount": {
+                        "currency_code": invoice_data.currency.value,
+                        "value": f"{item.price:.2f}",
+                    },
+                    "unit_of_measure": "QUANTITY",
+                }
+                for item in invoice_data.items
+            ],
         }
 
         if payload["primary_recipients"][0]["billing_info"]["phones"] is None:
@@ -148,28 +177,32 @@ class Invoice(_PayPalResource):
             return None
 
         try:
-            digits = ''.join(c for c in phone if c.isdigit())
-            return [{
-                "country_code": "1",
-                "national_number": digits[-10:],
-                "phone_type": "MOBILE"
-            }]
+            digits = "".join(c for c in phone if c.isdigit())
+            return [
+                {
+                    "country_code": "1",
+                    "national_number": digits[-10:],
+                    "phone_type": "MOBILE",
+                }
+            ]
         except Exception:
             logger.warning("Failed to format phone number")
             return None
 
     @classmethod
-    def _parse_response(cls, response: Dict[str,
-                                            Any]) -> PayPalInvoiceResponse:
+    def _parse_response(cls, response: Dict[str, Any]) -> PayPalInvoiceResponse:
         """Convert PayPal API response to our schema"""
         return PayPalInvoiceResponse(
             invoice_id=response["id"],
             status=response["status"],
             amount_due=float(response["amount"]["value"]),
             currency=response["amount"]["currency_code"],
-            due_date=datetime.strptime(response["payment_term"]["due_date"],
-                                       "%Y-%m-%d")
-            if "payment_term" in response else None)
+            due_date=(
+                datetime.strptime(response["payment_term"]["due_date"], "%Y-%m-%d")
+                if "payment_term" in response
+                else None
+            ),
+        )
 
 
 class Order(_PayPalResource):
@@ -182,21 +215,23 @@ class Order(_PayPalResource):
 
     @classmethod
     async def create_from_invoice(
-            cls, invoice: PayPalInvoiceResponse) -> Dict[str, Any]:
+        cls, invoice: PayPalInvoiceResponse, trasaction_id: str
+    ) -> Dict[str, Any]:
         """Create order from invoice (Stripe-like pattern)"""
         cls._ensure_client_initialized()
 
         payload = {
-            "intent":
-            "CAPTURE",
-            "purchase_units": [{
-                "reference_id": invoice.invoice_id,
-                "description": f"Payment for invoice {invoice.invoice_id}",
-                "amount": {
-                    "currency_code": invoice.currency,
-                    "value": str(invoice.amount_due)
+            "intent": "CAPTURE",
+            "purchase_units": [
+                {
+                    "reference_id": invoice.invoice_id,
+                    "description": f"Payment for invoice {invoice.invoice_id}",
+                    "amount": {
+                        "currency_code": invoice.currency,
+                        "value": str(invoice.amount_due),
+                    },
                 }
-            }],
+            ],
             "payment_source": {
                 "paypal": {
                     "experience_context": {
@@ -206,39 +241,54 @@ class Order(_PayPalResource):
                         "user_action": "PAY_NOW",
                         "return_url": cls._return_url,
                         "cancel_url": cls._cancel_url,
-                        "payment_method_preference":
-                        "IMMEDIATE_PAYMENT_REQUIRED"
+                        "payment_method_preference": "IMMEDIATE_PAYMENT_REQUIRED",
                     }
                 }
-            }
+            },
         }
 
         response = await cls._client._make_request(
-            "POST",
-            "/v2/checkout/orders",
-            payload,
-            idempotency_key=invoice.invoice_id)
+            "POST", "/v2/checkout/orders", payload, idempotency_key=invoice.invoice_id
+        )
 
-        approval_url = next(link["href"] for link in response["links"]
-                            if link["rel"] == "payer-action")
+        print('response: cdfaDG', response)
+        approval_url = next(
+            link["href"] for link in response["links"] if link["rel"] == "payer-action"
+        )
+        await event_tracker.track_event(
+            PaymentEvent(
+                event_type=PaymentEventType.PAYPAL_ORDER_CREATED,
+                processor="paypal",
+                transaction_id=trasaction_id,
+                resource_id=response["id"],
+                status="succeeded",
+                amount=response["purchase_units"][0]["amount"]["value"],
+                currency=response["purchase_units"][0]["amount"]["currency_code"],
+                customer_id="",
+                processor_metadata={"data": response},
+                metadata=response.get("metadata", {}),
+            )
+        )
+
         return {
             "order_id": response["id"],
             "approval_url": approval_url,
-            "status": response["status"]
+            "status": response["status"],
         }
 
     @classmethod
-    async def capture(cls, order_id: str,
-                      invoice_id: str) -> PayPalPaymentResponse:
+    async def capture(cls, order_id: str, invoice_id: str) -> PayPalPaymentResponse:
         """Capture an authorized payment"""
         if cls._client is None:
             raise ValueError(
-                "PayPal not configured. Call paypal.set_global_config() first")
+                "PayPal not configured. Call paypal.set_global_config() first"
+            )
 
         capture = await cls._client._make_request(
             "POST",
             f"/v2/checkout/orders/{order_id}/capture",
-            idempotency_key=invoice_id)
+            idempotency_key=invoice_id,
+        )
 
         if capture.get("status") != "COMPLETED":
             raise PayPalPaymentCaptureError("Payment not completed")
@@ -246,9 +296,14 @@ class Order(_PayPalResource):
         return PayPalPaymentResponse(
             payment_id=capture["id"],
             invoice_id=invoice_id,
-            amount=float(capture["purchase_units"][0]["payments"]["captures"]
-                         [0]["amount"]["value"]),
-            currency=capture["purchase_units"][0]["payments"]["captures"][0]
-            ["amount"]["currency_code"],
+            amount=float(
+                capture["purchase_units"][0]["payments"]["captures"][0]["amount"][
+                    "value"
+                ]
+            ),
+            currency=capture["purchase_units"][0]["payments"]["captures"][0]["amount"][
+                "currency_code"
+            ],
             status="COMPLETED",
-            captured_at=datetime.now())
+            captured_at=datetime.now(),
+        )

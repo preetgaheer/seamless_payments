@@ -1,40 +1,55 @@
 # seamless_payments/db_integration.py
+import asyncio
 from typing import Optional
 from seamless_payments.db.base import DatabaseInterface
-from .schemas import DatabaseType, TransactionBase, TransactionStatus
-from .factory import DatabaseFactory
-from .event_tracking import PaymentEvent, PaymentEventType, event_tracker
 import logging
+from seamless_payments.db.schemas import (
+    DatabaseType,
+    TransactionBase,
+    TransactionStatus,
+)
+from seamless_payments.db.factory import DatabaseFactory
+from seamless_payments.db.event_tracking import (
+    PaymentEvent,
+    PaymentEventType,
+    event_tracker,
+)
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("stripe")
 
 
 class DatabaseIntegration:
-
     def __init__(self):
-        self._db: Optional[DatabaseInterface] = None
+        self._db: Optional[DatabaseInterface] = (
+            None  # Changed type hint to DatabaseInterface
+        )
         self._initialized = False
 
-    async def initialize(self,
-                         db_type: DatabaseType = DatabaseType.SQLITE,
-                         **kwargs):
+    async def initialize(self, db_type: DatabaseType = DatabaseType.SQLITE, **kwargs):
+
         if self._initialized:
+            logger.warning("Database integration already initialized")
             return
 
-        self._db = DatabaseFactory.create_database(db_type, **kwargs)
-        await self._db.initialize()
+        logger.info(f"Initializing database integration with type: {db_type}")
+
+        # Create and initialize database in one atomic operation
+        self._db = await DatabaseFactory.create_database(db_type, **kwargs)
+
+        logger.info(f"Database initialized: {self._db}")
+        logger.info(f"Event tracker: {event_tracker}")
 
         # Register our handler with the event tracker
-        event_tracker.add_handler(self.handle_payment_event)
-        event_tracker.enable_tracking()
-
+        await event_tracker.add_handler(self.handle_payment_event)
+        await event_tracker.enable_tracking()
         self._initialized = True
-        logger.info("Database integration initialized")
+
+        logger.info(f"Event tracker enabled: {event_tracker._tracking_enabled}")
+        logger.info("Database integration initialization completed")
 
     async def handle_payment_event(self, event: PaymentEvent):
         if not self._db:
-            logger.warning(
-                "Database not initialized - skipping event tracking")
+            logger.warning("Database not initialized - skipping event tracking")
             return
 
         # Map event to transaction record
@@ -50,10 +65,10 @@ class DatabaseIntegration:
             "customer_id": event.customer_id,
             "processor_metadata": {
                 "event_type": event.event_type.value,
-                **event.metadata
+                **event.processor_metadata,
             },
             "parent_event_id": event.parent_event_id,
-            "metadata": {}
+            "metadata": event.metadata,
         }
         transaction_data = TransactionBase(**transaction_data)
 

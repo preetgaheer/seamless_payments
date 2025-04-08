@@ -10,7 +10,6 @@ class PaymentTransaction:
     """
 
     def __init__(self, transaction_id: str):
-        print("INIT"*50)
         self._operations = []
         self.transaction_id = transaction_id
 
@@ -56,7 +55,6 @@ async def payment_transaction():
     Async context manager to wrap PaymentTransaction usage.
     """
     transaction_id = str(uuid4())  # generate random transaction ID
-    print('transaction_id: ', transaction_id)
     txn = PaymentTransaction(transaction_id)
     try:
         await txn.__aenter__()

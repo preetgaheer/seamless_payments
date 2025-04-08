@@ -20,7 +20,7 @@ class StripeCustomer(BaseModel):
     tax_id: Optional[str] = Field(
         None, description="Tax ID/VAT number for the customer")
     metadata: Optional[Dict[str,
-                            str]] = Field(None,
+                            str]] = Field({},
                                           description="Additional metadata")
 
 
@@ -33,7 +33,7 @@ class StripeCustomerRequest(BaseModel):
     tax_id: Optional[str] = Field(
         None, description="Tax ID/VAT number for the customer")
     metadata: Optional[Dict[str,
-                            str]] = Field(None,
+                            str]] = Field({},
                                           description="Additional metadata")
 
 

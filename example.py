@@ -10,13 +10,19 @@ import webbrowser
 # local imports
 from seamless_payments.manager import payment_transaction
 import seamless_payments.stripe as stripe
-from seamless_payments.schemas.stripe import (StripeCustomerRequest,
-                                              StripeInvoiceRequest, StripeItem,
-                                              StripeCurrency)
+from seamless_payments.schemas.stripe import (
+    StripeCustomerRequest,
+    StripeInvoiceRequest,
+    StripeItem,
+    StripeCurrency,
+)
 from seamless_payments import paypal
-from seamless_payments.schemas.paypal import (PayPalCustomer,
-                                              PayPalInvoiceRequest, PayPalItem,
-                                              PayPalCurrency)
+from seamless_payments.schemas.paypal import (
+    PayPalCustomer,
+    PayPalInvoiceRequest,
+    PayPalItem,
+    PayPalCurrency,
+)
 from seamless_payments.db.init import db_integration
 from seamless_payments import app
 
@@ -43,6 +49,7 @@ app = FastAPI()
 payment_intent_data = None
 payment_confirmation = False
 payment_failure = False
+payment_intent_id = None
 
 
 def reset_payment_state():
@@ -55,20 +62,19 @@ def reset_payment_state():
 
 @app.post("/payment-auth-failure")
 async def payment_auth_failure(request: Request):
-    global payment_failure, payment_confirmation
-    payment_failure = True
-    payment_confirmation = True
+    global payment_failure, payment_confirmation, payment_intent_id
     data = await request.json()
     payment_intent_id = data.get("payment_intent_id")
+    payment_failure = True
+    payment_confirmation = True
+
     error_message = data.get("error_message")
 
     if not payment_intent_id or not error_message:
         raise HTTPException(400, "Invalid request")
 
     # Log the failure (Can also send an email or trigger an alert)
-    print(
-        f"Payment authentication failed for {payment_intent_id}: {error_message}"
-    )
+    print(f"Payment authentication failed for {payment_intent_id}: {error_message}")
 
     return JSONResponse({"success": True, "message": "Failure recorded"})
 
@@ -78,7 +84,8 @@ async def get_payment_page():
     if not payment_intent_data:
         raise HTTPException(400, "PaymentIntent not initialized")
 
-    return HTMLResponse(f"""
+    return HTMLResponse(
+        f"""
     <!DOCTYPE html>
     <html>
     <head>
@@ -174,7 +181,8 @@ async def get_payment_page():
         </script>
     </body>
     </html>
-    """)
+    """
+    )
 
 
 @app.post("/attach-payment-method")
@@ -182,8 +190,8 @@ async def attach_payment_method(request: Request):
     data = await request.json()
     try:
         await stripe.PaymentIntent.update(
-            data["payment_intent_id"],
-            payment_method=data["payment_method_id"])
+            data["payment_intent_id"], payment_method=data["payment_method_id"]
+        )
         return JSONResponse({"success": True})
     except Exception as e:
         raise HTTPException(400, str(e))
@@ -193,7 +201,6 @@ async def attach_payment_method(request: Request):
 async def payment_confirmation_api(request: Request):
     global payment_confirmation
     data = await request.json()
-    print('data: ', data)
     if data.get("status") == "requires_capture":
         payment_confirmation = True
         return JSONResponse({"success": True})
@@ -211,32 +218,43 @@ async def run_payment_flow():
     print("Getting customer...")
     # Create or retrieve customer
     async with payment_transaction() as txn:
-        customer_email = "johnjonga@example.com"
-        customer = await txn.add(lambda txn_id: stripe.Customer.create_or_get(
-            StripeCustomerRequest(name="John Doe",
-                                  email=customer_email,
-                                  phone="+1234567890"), txn_id))
+        customer_email = "johnjonga@new.com"
+        customer = await txn.add(
+            lambda txn_id: stripe.Customer.create_or_get(
+                StripeCustomerRequest(
+                    name="John Doe", email=customer_email, phone="+1234567890"
+                ),
+                txn_id,
+            )
+        )
 
-        print('creating invoice ...')
-        print('customer: ', customer)
+        print("customer: ", customer)
+        print("creating invoice ...")
         # Create invoice
-        invoice = await txn.add(lambda txn_id: stripe.Invoice.create(
-            StripeInvoiceRequest(
-                customer=customer,
-                items=[StripeItem(name="Product 1", price=15.42, quantity=2)],
-                currency=StripeCurrency.INR.value,
-                notes="Thank you for your business!",
-                due_date=datetime.now() + timedelta(days=10)), txn_id))
+        invoice = await txn.add(
+            lambda txn_id: stripe.Invoice.create(
+                StripeInvoiceRequest(
+                    customer=customer,
+                    items=[StripeItem(name="Product 1", price=15.42, quantity=2)],
+                    currency=StripeCurrency.INR.value,
+                    notes="Thank you for your business!",
+                    due_date=datetime.now() + timedelta(days=10),
+                ),
+                txn_id,
+            )
+        )
         print(f"Invoice created! ID: {invoice.id}")
 
-    # Create PaymentIntent from invoice
-    print("Creating PaymentIntent from invoice ...")
-    payment_intent = await stripe.PaymentIntent.create_from_invoice(
-        invoice, customer)
-    print(f"PaymentIntent created! ID: {payment_intent['payment_intent_id']}")
+        # Create PaymentIntent from invoice
+        print("Creating PaymentIntent from invoice ...")
+        payment_intent = await txn.add(
+            lambda txn_id: stripe.PaymentIntent.create_from_invoice(
+                invoice, customer, txn_id
+            )
+        )
+        print(f"PaymentIntent created! ID: {payment_intent['payment_intent_id']}")
     payment_intent_data = payment_intent
-    print("PaymentIntent data:")
-
+    print("payment_intent_data: ", payment_intent_data)
     # Open payment page
     webbrowser.open("http://localhost:8000/payment-page")
 
@@ -246,13 +264,19 @@ async def run_payment_flow():
     if payment_failure:
         print("Payment failed!")
         reset_payment_state()
+        payment = await stripe.PaymentIntent.cancel(
+            payment_intent_id,
+            reason="auth failure",
+        )
+
         return
     print("Payment confirmed!")
     print("Trying to capture payment ...")
     # 7. Capture payment (only if frontend confirmed success)
     try:
         payment = await stripe.PaymentIntent.capture(
-            payment_intent_data["payment_intent_id"])
+            payment_intent_data["payment_intent_id"]
+        )
         print(f"✅ Payment captured! ID: {payment.id}")
     except Exception as e:
         print(f"⚠️ Capture failed: {str(e)}")
@@ -266,7 +290,8 @@ async def run_payment_flow():
         reset_payment_state()
 
 
-async def main2():
+async def run_paypal():
+    await db_init()
     # try:
     # Configure exactly like Stripe
     paypal.client_id = PAYPAL_CLIENT_ID
@@ -280,56 +305,66 @@ async def main2():
 
     # Create invoice EXACTLY like Stripe
     print("Creating invoice ...")
-    invoice = await paypal.Invoice.create(
-        PayPalInvoiceRequest(
-            **{
-                "customer":
-                PayPalCustomer(name="John Doe",
-                               email="john@example.com",
-                               phone="+1234567890"),
-                "items":
-                [PayPalItem(name="Product 1", price=19.99, quantity=2)],
-                "currency":
-                PayPalCurrency.USD,
-                "notes":
-                "Thank you for your business!",
-                "due_date":
-                datetime.now() + timedelta(days=10)
-            }))
-    print(f"Invoice created! ID: {invoice.invoice_id}")
+    async with payment_transaction() as txn:
+        invoice = await txn.add(
+            lambda txn_id: paypal.Invoice.create(
+                PayPalInvoiceRequest(
+                    **{
+                        "customer": PayPalCustomer(
+                            name="John Doe",
+                            email="john@example.com",
+                            phone="+1234567890",
+                        ),
+                        "items": [
+                            PayPalItem(name="Product 1", price=19.99, quantity=2)
+                        ],
+                        "currency": PayPalCurrency.USD,
+                        "notes": "Thank you for your business!",
+                        "due_date": datetime.now() + timedelta(days=10),
+                    }
+                ),
+                txn_id,
+            )
+        )
+        print(f"Invoice created! ID: {invoice.invoice_id}")
 
-    # Create order from invoice
-    order = await paypal.Order.create_from_invoice(invoice)
-    print(f"Order created! ID: {order['order_id']}")
+        # Create order from invoice
+        order = await txn.add(
+            lambda txn_id: paypal.Order.create_from_invoice(invoice, txn_id)
+        )
+        print(f"Order created! ID: {order['order_id']}")
 
-    print("\nPayment approval required!")
-    print("Please visit this URL to approve the payment:")
-    print(order["approval_url"])
-    print("\nWaiting for payment approval...")
+        print("\nPayment approval required!")
+        print("Please visit this URL to approve the payment:")
+        print(order["approval_url"])
+        print("\nWaiting for payment approval...")
 
-    await asyncio.sleep(60)
-    print('Trying to capture payment ...')
-    # Capture payment
-    payment = await paypal.Order.capture(order["order_id"], invoice.invoice_id)
-    print(f"Payment captured! ID: {payment.id}")
-    print(f"Payment successful! ID: {payment.payment_id}")
+        await asyncio.sleep(60)
+        print("Trying to capture payment ...")
+        # Capture payment
+        payment = await paypal.Order.capture(order["order_id"], invoice.invoice_id)
+        print(f"Payment captured! ID: {payment.payment_id}")
+        print(f"Payment successful! ID: {payment.payment_id}")
 
 
-async def main():
+async def run_server():
+    print("running server...")
     server = uvicorn.Server(uvicorn.Config(app, host="0.0.0.0", port=8000))
-    await asyncio.gather(server.serve(), run_payment_flow())
+    await server.serve()
 
 
-async def main3():
-    print('Initializing db...')
+async def db_init():
+    print("Initializing db...")
     await db_integration.initialize()
 
 
 async def main4():
-    server = uvicorn.Server(uvicorn.Config(app, host="0.0.0.0", port=8000))
-    await asyncio.gather(server.serve(), db_integration.initialize(),
-                         run_payment_flow())
+    # Ensure DB is initialized before anything else
+    await db_init()
+
+    # Then start server and payment flow concurrently
+    await asyncio.gather(run_server(), run_payment_flow())
 
 
 if __name__ == "__main__":
-    asyncio.run(main4())
+    asyncio.run(run_paypal())

@@ -1,11 +1,14 @@
 from typing import Optional, Dict, Any
 from datetime import datetime
 import logging
+
 # local imports
-from seamless_payments.db.event_tracking import (PaymentEvent,
-                                                 PaymentEventType,
-                                                 track_payment_event,
-                                                 event_tracker)
+from seamless_payments.db.event_tracking import (
+    PaymentEvent,
+    PaymentEventType,
+    track_payment_event,
+    event_tracker,
+)
 from seamless_payments.exceptions.stripe import (
     StripeCustomerCreationError,
     StripeCustomerRetrievalError,
@@ -14,11 +17,16 @@ from seamless_payments.exceptions.stripe import (
     StripePaymentIntentError,
 )
 from seamless_payments.schemas.stripe import (
-    StripeCustomer, StripeCustomerRequest, StripeInvoiceItemRequest,
-    StripeInvoiceRequest, StripeInvoiceResponse, StripePaymentResponse)
+    StripeCustomer,
+    StripeCustomerRequest,
+    StripeInvoiceItemRequest,
+    StripeInvoiceRequest,
+    StripeInvoiceResponse,
+    StripePaymentResponse,
+)
 from seamless_payments.clients.stripe import StripeClient
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("stripe")
 
 
 class _StripeResource:
@@ -29,10 +37,10 @@ class _StripeResource:
 
     @classmethod
     def _ensure_client_initialized(cls):
-        print("INIT CLINT 😀")
         """Initialize client if not already done"""
         if cls._client is None:
             from .. import stripe  # Import the main module
+
             if not stripe.api_key:
                 raise ValueError("Stripe not configured. Set stripe.api_key")
 
@@ -45,9 +53,11 @@ class InvoiceItem(_StripeResource):
     """Handles creation and management of Stripe invoice items"""
 
     @classmethod
-    async def create(cls,
-                     invoice_item_data: StripeInvoiceItemRequest,
-                     invoice_id: Optional[str] = None) -> Dict[str, Any]:
+    async def create(
+        cls,
+        invoice_item_data: StripeInvoiceItemRequest,
+        invoice_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Create a Stripe invoice item
         Args:
@@ -62,13 +72,12 @@ class InvoiceItem(_StripeResource):
             total_amount = invoice_item_data.amount * invoice_item_data.quantity
             payload = {
                 "customer": invoice_item_data.customer_id,
-                "amount":
-                int(round(total_amount, 0)) * 100,  # Convert to cents
+                "amount": int(round(total_amount, 0)) * 100,  # Convert to cents
                 "currency": invoice_item_data.currency.value,
                 "description": invoice_item_data.description,
                 # "quantity":
                 # invoice_item_data.quantity,
-                "metadata": invoice_item_data.metadata or {}
+                "metadata": invoice_item_data.metadata or {},
             }
 
             if invoice_id:
@@ -94,29 +103,26 @@ class InvoiceItem(_StripeResource):
                 "POST",
                 "/v1/invoiceitems",
                 payload,
-                idempotency_key=
-                f"INVITEM-{datetime.now().timestamp()}-{invoice_item_data.product_name}"
+                idempotency_key=f"INVITEM-{datetime.now().timestamp()}-{invoice_item_data.product_name}",
             )
 
             if not response or "id" not in response:
-                raise StripeInvoiceItemCreationError(
-                    "Failed to create invoice item")
+                raise StripeInvoiceItemCreationError("Failed to create invoice item")
 
             return response
 
         except Exception as e:
             logger.error("Invoice item creation failed", exc_info=True)
-            raise StripeInvoiceItemCreationError(
-                "Failed to create invoice item") from e
+            raise StripeInvoiceItemCreationError("Failed to create invoice item") from e
 
 
 class Invoice(_StripeResource):
     """Handles creation and management of Stripe invoices"""
 
     @classmethod
-    async def create(cls,
-                     invoice_data: StripeInvoiceRequest,
-                     transction_id: str = None) -> StripeInvoiceResponse:
+    async def create(
+        cls, invoice_data: StripeInvoiceRequest, transction_id: str = None
+    ) -> StripeInvoiceResponse:
         """
         Create a Stripe invoice following the correct flow:
         1. Create draft invoice
@@ -132,44 +138,46 @@ class Invoice(_StripeResource):
             # Step 1: Create draft invoice
             draft_invoice = await cls._create_draft(invoice_data)
             await event_tracker.track_event(
-                PaymentEvent(event_type=PaymentEventType.INVOICE_CREATED,
-                             processor="stripe",
-                             transaction_id=transction_id,
-                             resource_id=draft_invoice["id"],
-                             status="completed",
-                             amount=float(draft_invoice["amount_due"] / 100),
-                             currency=draft_invoice["currency"],
-                             customer_id=invoice_data.customer.id,
-                             processor_metadata={
-                                 "invoice_number": draft_invoice.get("number"),
-                                 "status": draft_invoice["status"]
-                             },
-                             metadata={}))
+                PaymentEvent(
+                    event_type=PaymentEventType.INVOICE_DRAFT_CREATED,
+                    processor="stripe",
+                    transaction_id=transction_id,
+                    resource_id=draft_invoice["id"],
+                    status="pending",
+                    amount=float(draft_invoice["amount_due"] / 100),
+                    currency=draft_invoice["currency"],
+                    customer_id=invoice_data.customer.id,
+                    processor_metadata={"data": draft_invoice},
+                    metadata=draft_invoice["metadata"],
+                )
+            )
 
             # Step 2: Add invoice items
-            await cls._add_items_to_invoice(draft_invoice["id"],
-                                            invoice_data,
-                                            invoice=draft_invoice)
+            await cls._add_items_to_invoice(
+                draft_invoice["id"], invoice_data, invoice=draft_invoice
+            )
 
             # Step 3: Finalize invoice
-            finalized_invoice = await cls._finalize_invoice(draft_invoice["id"]
-                                                            )
+            finalized_invoice = await cls._finalize_invoice(draft_invoice)
 
             # Update the event with the actual invoice ID idempotency keys
             await event_tracker.track_event(
                 PaymentEvent(
                     event_type=PaymentEventType.INVOICE_FINALISED,
+                    transaction_id=transction_id,
                     processor="stripe",
                     resource_id=finalized_invoice["id"],
-                    status="completed",
+                    status="succeeded",
                     amount=float(finalized_invoice["amount_due"] / 100),
                     currency=finalized_invoice["currency"],
                     customer_id=invoice_data.customer.id,
                     processor_metadata={
                         "invoice_number": finalized_invoice.get("number"),
-                        "status": finalized_invoice["status"]
+                        "status": finalized_invoice["status"],
                     },
-                    metadata={}))
+                    metadata=finalized_invoice["metadata"],
+                )
+            )
 
             return cls._parse_response(finalized_invoice)
 
@@ -178,8 +186,7 @@ class Invoice(_StripeResource):
             raise StripeInvoiceCreationError("Failed to create invoice") from e
 
     @classmethod
-    async def _create_draft(
-            cls, invoice_data: StripeInvoiceRequest) -> Dict[str, Any]:
+    async def _create_draft(cls, invoice_data: StripeInvoiceRequest) -> Dict[str, Any]:
         """Create a draft invoice without line items"""
         payload = {
             "customer": invoice_data.customer.id,
@@ -197,7 +204,8 @@ class Invoice(_StripeResource):
             "POST",
             "/v1/invoices",
             payload,
-            idempotency_key=f"DRAFT-INV-{datetime.now().timestamp()}")
+            idempotency_key=f"DRAFT-INV-{datetime.now().timestamp()}",
+        )
 
         if not response or "id" not in response:
             raise StripeInvoiceCreationError("Failed to create draft invoice")
@@ -205,9 +213,9 @@ class Invoice(_StripeResource):
         return response
 
     @classmethod
-    async def _add_items_to_invoice(cls, invoice_id: str,
-                                    invoice_data: StripeInvoiceRequest,
-                                    invoice) -> None:
+    async def _add_items_to_invoice(
+        cls, invoice_id: str, invoice_data: StripeInvoiceRequest, invoice
+    ) -> None:
         """Add all items to the invoice using InvoiceItem resource"""
         for item in invoice_data.items:
             item_request = StripeInvoiceItemRequest(
@@ -219,28 +227,32 @@ class Invoice(_StripeResource):
                 product_name=item.name,
                 product_description=item.description,
                 metadata=invoice_data.metadata,
+                # TODO - make price id dyanamic
                 # price_id=item.price_id  # Optional, if using predefined prices
             )
-            invoice_item = await InvoiceItem.create(item_request,
-                                                    invoice_id=invoice_id)
+            invoice_item = await InvoiceItem.create(item_request, invoice_id=invoice_id)
+            invoice_item_price = item.price * item.quantity
             await event_tracker.track_event(
                 PaymentEvent(
                     event_type=PaymentEventType.INVOICE_ITEM_CREATED,
                     processor="stripe",
                     transaction_id=invoice_data.metadata["transaction_id"],
                     resource_id=invoice_item["id"],
-                    status="completed",
-                    amount=float(invoice["amount_due"] / 100),
-                    currency=invoice_data.currency,
+                    status="pending",
+                    amount=invoice_item_price,
+                    currency=invoice_data.currency.value,
                     customer_id=invoice_data.customer.id,
-                    processor_metadata={"data": invoice_data},
-                    metadata={}))
+                    processor_metadata={},
+                    metadata=invoice_item["metadata"],
+                )
+            )
 
     @classmethod
-    async def _finalize_invoice(cls, invoice_id: str) -> Dict[str, Any]:
+    async def _finalize_invoice(cls, invoice: Dict[str, Any]) -> Dict[str, Any]:
         """Finalize the draft invoice"""
         response = await cls._client._make_request(
-            "POST", f"/v1/invoices/{invoice_id}/finalize")
+            "POST", f"/v1/invoices/{invoice["id"]}/finalize"
+        )
 
         if not response or "id" not in response:
             raise StripeInvoiceCreationError("Failed to finalize invoice")
@@ -248,8 +260,7 @@ class Invoice(_StripeResource):
         return response
 
     @classmethod
-    def _parse_response(cls, response: Dict[str,
-                                            Any]) -> StripeInvoiceResponse:
+    def _parse_response(cls, response: Dict[str, Any]) -> StripeInvoiceResponse:
         """Convert Stripe API response to our schema"""
         return StripeInvoiceResponse(
             id=response["id"],
@@ -258,12 +269,16 @@ class Invoice(_StripeResource):
             amount_due=float(response["amount_due"] / 100),
             amount_paid=float(response["amount_paid"] / 100),
             currency=response["currency"],
-            due_date=datetime.fromtimestamp(response["due_date"])
-            if response.get("due_date") else None,
+            due_date=(
+                datetime.fromtimestamp(response["due_date"])
+                if response.get("due_date")
+                else None
+            ),
             created_at=datetime.fromtimestamp(response["created"]),
             invoice_pdf=response.get("invoice_pdf"),
             hosted_invoice_url=response.get("hosted_invoice_url"),
             payment_intent=response.get("payment_intent"),
+            metadata=response.get("metadata", {}),
         )
 
 
@@ -274,8 +289,12 @@ class PaymentIntent(_StripeResource):
     _brand_name: str = None
 
     @classmethod
-    async def create_from_invoice(cls, invoice: StripeInvoiceResponse,
-                                  customer: StripeCustomer) -> Dict[str, Any]:
+    async def create_from_invoice(
+        cls,
+        invoice: StripeInvoiceResponse,
+        customer: StripeCustomer,
+        transaction_id: str,
+    ) -> Dict[str, Any]:
         """Create PaymentIntent from invoice (Stripe-like pattern)"""
         cls._ensure_client_initialized()
         # get total amount from invoice items
@@ -288,43 +307,71 @@ class PaymentIntent(_StripeResource):
             "description": f"Payment for invoice {invoice.id}",
             "payment_method_types": ["card"],
             "confirm": False,
-            "capture_method": 'manual',
+            "capture_method": "manual",
+            "metadata": invoice.metadata,
         }
 
-        response = await cls._client._make_request("POST",
-                                                   "/v1/payment_intents",
-                                                   payload,
-                                                   idempotency_key=invoice.id)
+        response = await cls._client._make_request(
+            "POST", "/v1/payment_intents", payload, idempotency_key=invoice.id
+        )
+
+        await event_tracker.track_event(
+            PaymentEvent(
+                event_type=PaymentEventType.PAYMENT_INTENT_CREATED,
+                processor="stripe",
+                transaction_id=response["metadata"]["transaction_id"],
+                resource_id=response["id"],
+                status="succeeded",
+                amount=response["amount"] / 100,
+                currency=response["currency"],
+                customer_id=response["customer"],
+                processor_metadata={"data": response},
+                metadata=response["metadata"],
+            )
+        )
 
         return {
             "payment_intent_id": response["id"],
             "status": response["status"],
-            "client_secret": response["client_secret"]
+            "client_secret": response["client_secret"],
         }
 
     @classmethod
-    async def update(cls, payment_intent_id: str, *args,
-                     **kwargs) -> Dict[str, Any]:
-        """Attach a payment method to an existing PaymentIntent, or 
+    async def update(cls, payment_intent_id: str, *args, **kwargs) -> Dict[str, Any]:
+        """Attach a payment method to an existing PaymentIntent, or
         update other attributes dynamically"""
         if cls._client is None:
-            raise ValueError(
-                "Stripe not configured. Call stripe.configure() first")
+            raise ValueError("Stripe not configured. Call stripe.configure() first")
 
         # Prepare the payload
         payload = {}
 
         # Ensure payment_method_id is passed in the arguments or kwargs
-        if 'payment_method_id' in kwargs:
-            payload["payment_method"] = kwargs['payment_method_id']
+        if "payment_method_id" in kwargs:
+            payload["payment_method"] = kwargs["payment_method_id"]
 
         # Add any additional attributes passed via kwargs to the payload
         for key, value in kwargs.items():
-            if key != 'payment_method_id':  # Avoid duplicating the payment_method_id key
+            if key != "payment_method_id":
                 payload[key] = value
 
         response = await cls._client._make_request(
-            "POST", f"/v1/payment_intents/{payment_intent_id}", payload)
+            "POST", f"/v1/payment_intents/{payment_intent_id}", payload
+        )
+        await event_tracker.track_event(
+            PaymentEvent(
+                event_type=PaymentEventType.PAYMENT_INTENT_UPDATED,
+                processor="stripe",
+                transaction_id=response["metadata"]["transaction_id"],
+                resource_id=response["id"],
+                status="succeeded",
+                amount=response["amount"] / 100,
+                currency=response["currency"],
+                customer_id=response["customer"],
+                processor_metadata={"data": response},
+                metadata=response["metadata"],
+            )
+        )
 
         return {
             "payment_intent_id": response["id"],
@@ -336,14 +383,29 @@ class PaymentIntent(_StripeResource):
     async def confirm(cls, payment_intent_id: str) -> Dict[str, Any]:
         """Confirm a PaymentIntent"""
         if cls._client is None:
-            raise ValueError(
-                "Stripe not configured. Call stripe.configure() first")
+            raise ValueError("Stripe not configured. Call stripe.configure() first")
 
         response = await cls._client._make_request(
-            "POST", f"/v1/payment_intents/{payment_intent_id}/confirm")
+            "POST", f"/v1/payment_intents/{payment_intent_id}/confirm"
+        )
 
         if response.get("status") == "requires_payment_method":
             raise StripePaymentIntentError("Payment method is required")
+
+        await event_tracker.track_event(
+            PaymentEvent(
+                event_type=PaymentEventType.PAYMENT_CONFIRMED,
+                processor="stripe",
+                transaction_id=response["metadata"]["transaction_id"],
+                resource_id=response["id"],
+                status="succeeded",
+                amount=response["amount"] / 100,
+                currency=response["currency"],
+                customer_id=response["customer"],
+                processor_metadata={"data": response},
+                metadata=response["metadata"],
+            )
+        )
 
         return {
             "payment_intent_id": response["id"],
@@ -352,28 +414,85 @@ class PaymentIntent(_StripeResource):
         }
 
     @classmethod
+    async def cancel(
+        cls, payment_intent_id: str, transaction_id: Optional[str] = '', reason: Optional[str] = None
+    ) -> StripePaymentResponse:
+        """Cancel a PaymentIntent"""
+        if cls._client is None:
+            raise ValueError("Stripe not configured. Call stripe.configure() first")
+        payload = {}
+        if reason:
+            payload["cancellation_reason"] = reason
+        response = await cls._client._make_request(
+            "POST", f"/v1/payment_intents/{payment_intent_id}/cancel"
+        )
+
+        if response.get("status") != "canceled":
+            raise StripePaymentIntentError("Payment not canceled")
+
+        await event_tracker.track_event(
+            PaymentEvent(
+                event_type=PaymentEventType.PAYMENT_INTENT_CANCELED,
+                processor="stripe",
+                transaction_id=response["metadata"]["transaction_id"],
+                resource_id=response["id"],
+                status="succeeded",
+                amount=response["amount"] / 100,
+                currency=response["currency"],
+                customer_id=response["customer"],
+                processor_metadata={"data": response},
+                metadata=response["metadata"],
+                payment_status="failed",
+            )
+        )
+
+        return StripePaymentResponse(
+            id=response["id"],
+            amount=float(response["amount_received"] / 100),
+            currency=response["currency"],
+            status=response["status"],
+            captured_at=datetime.now(),
+        )
+
+    @classmethod
     async def capture(cls, payment_intent_id: str) -> StripePaymentResponse:
         """Capture an authorized payment"""
         if cls._client is None:
-            raise ValueError(
-                "Stripe not configured. Call stripe.configure() first")
+            raise ValueError("Stripe not configured. Call stripe.configure() first")
 
         response = await cls._client._make_request(
-            "POST", f"/v1/payment_intents/{payment_intent_id}/capture")
+            "POST", f"/v1/payment_intents/{payment_intent_id}/capture"
+        )
 
         if response.get("status") != "succeeded":
             raise StripePaymentIntentError("Payment not completed")
 
-        return StripePaymentResponse(id=response["id"],
-                                     amount=float(response["amount_received"] /
-                                                  100),
-                                     currency=response["currency"],
-                                     status=response["status"],
-                                     captured_at=datetime.now())
+        await event_tracker.track_event(
+            PaymentEvent(
+                event_type=PaymentEventType.PAYMENT_CAPTURED,
+                processor="stripe",
+                transaction_id=response["metadata"]["transaction_id"],
+                resource_id=response["id"],
+                status="succeeded",
+                amount=response["amount"] / 100,
+                currency=response["currency"],
+                customer_id=response["customer"],
+                processor_metadata={"data": response},
+                metadata=response["metadata"],
+                payment_status="completed",
+            )
+        )
+
+        return StripePaymentResponse(
+            id=response["id"],
+            amount=float(response["amount_received"] / 100),
+            currency=response["currency"],
+            status=response["status"],
+            captured_at=datetime.now(),
+        )
 
     @classmethod
-    async def confirm_and_capture(
-            cls, payment_intent_id: str) -> StripePaymentResponse:
+    async def confirm_and_capture(cls, payment_intent_id: str) -> StripePaymentResponse:
         """Confirm and then capture a PaymentIntent"""
         # First confirm the payment intent
         confirm_response = await cls.confirm(payment_intent_id)
@@ -383,7 +502,8 @@ class PaymentIntent(_StripeResource):
             return capture_response
         else:
             raise StripePaymentIntentError(
-                "PaymentIntent not in 'requires_capture' status")
+                "PaymentIntent not in 'requires_capture' status"
+            )
 
 
 class Customer(_StripeResource):
@@ -393,69 +513,102 @@ class Customer(_StripeResource):
     _brand_name: str = None
 
     @classmethod
-    async def create_or_get(cls,
-                            customer_data: StripeCustomerRequest,
-                            transction_id: str = None) -> StripeCustomer:
+    async def create_or_get(
+        cls, customer_data: StripeCustomerRequest, transction_id: str = None
+    ) -> StripeCustomer:
         """Create a new Stripe customer or retrieve existing one"""
-        print('transction_id: RRRRRRRR', transction_id)
+
         cls._ensure_client_initialized()
 
         try:
             payload = {
                 "name": customer_data.name,
                 "email": customer_data.email,
-                "phone": customer_data.phone
+                "phone": customer_data.phone,
             }
             response = await cls._client._make_request(
                 "POST",
                 "/v1/customers",
                 payload,
                 idempotency_key=f"CUST-{customer_data.email}",
-                transction_id=transction_id)
+                transction_id=transction_id,
+            )
             if not response or "id" not in response:
-                raise StripeCustomerCreationError(
-                    "Failed to create Stripe customer")
-
-            return StripeCustomer(
+                raise StripeCustomerCreationError("Failed to create Stripe customer")
+            customer = StripeCustomer(
                 id=response["id"],
                 name=response.get("name"),
                 email=response.get("email"),
                 phone=response.get("phone"),
                 created_at=datetime.fromtimestamp(response["created"]),
+                metadata=customer_data.metadata,
             )
+            logger.info(f"Customer created {customer}")
+
+            await event_tracker.track_event(
+                PaymentEvent(
+                    event_type=PaymentEventType.CUSTOMER_CREATED,
+                    processor="stripe",
+                    transaction_id=transction_id,
+                    resource_id=customer.id,
+                    status="succeeded",
+                    amount=0,
+                    currency="",
+                    customer_id=customer.id,
+                    processor_metadata={"data": customer.model_dump(mode="json")},
+                    metadata=customer.metadata,
+                )
+            )
+            return customer
 
         except Exception as e:
             error_message = str(e)
-            if "already exists" in error_message or "duplicate" in error_message:
+            if ("already exists" in error_message) or ("duplicate" in error_message):
                 # Customer already exists, retrieve the existing customer
-                return await cls.get(email=customer_data.email)
+                customer = await cls.get(email=customer_data.email)
+                await event_tracker.track_event(
+                    PaymentEvent(
+                        event_type=PaymentEventType.CUSTOMER_RETRIEVED,
+                        processor="stripe",
+                        transaction_id=transction_id,
+                        resource_id=customer.id,
+                        status="succeeded",
+                        amount=0,
+                        currency="",
+                        customer_id=customer.id,
+                        processor_metadata={"data": customer.model_dump(mode="json")},
+                        metadata=customer.metadata,
+                    )
+                )
+                return customer
 
             logger.error("Customer creation failed", exc_info=True)
-            raise StripeCustomerCreationError(
-                "Failed to create customer") from e
+            raise StripeCustomerCreationError("Failed to create customer") from e
 
     @classmethod
-    async def get(cls,
-                  customer_id: Optional[str] = None,
-                  email: Optional[str] = None) -> StripeCustomer:
+    async def get(
+        cls, customer_id: Optional[str] = None, email: Optional[str] = None
+    ) -> StripeCustomer:
         """Retrieve a customer by ID or email"""
         cls._ensure_client_initialized()
 
         try:
             if customer_id:
                 response = await cls._client._make_request(
-                    "GET", f"/v1/customers/{customer_id}")
+                    "GET", f"/v1/customers/{customer_id}"
+                )
             elif email:
                 search_query = f"email:'{email}'"
                 search_response = await cls._client._make_request(
-                    "GET", "/v1/customers/search", {"query": search_query})
+                    "GET", "/v1/customers/search", {"query": search_query}
+                )
 
                 if not search_response.get("data"):
                     raise StripeCustomerRetrievalError(
-                        f"No customer found with email {email}")
+                        f"No customer found with email {email}"
+                    )
 
-                customer = search_response["data"][
-                    0]  # Exact match from search
+                customer = search_response["data"][0]  # Exact match from search
                 return StripeCustomer(
                     id=customer["id"],
                     name=customer.get("name"),
@@ -464,8 +617,7 @@ class Customer(_StripeResource):
                     created_at=datetime.fromtimestamp(customer["created"]),
                 )
             else:
-                raise ValueError(
-                    "Either customer_id or email must be provided")
+                raise ValueError("Either customer_id or email must be provided")
 
             return StripeCustomer(
                 id=response["id"],
@@ -477,5 +629,4 @@ class Customer(_StripeResource):
 
         except Exception as e:
             logger.error("Customer retrieval failed", exc_info=True)
-            raise StripeCustomerRetrievalError(
-                "Failed to retrieve customer") from e
+            raise StripeCustomerRetrievalError("Failed to retrieve customer") from e
